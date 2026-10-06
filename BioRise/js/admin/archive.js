@@ -1,0 +1,3 @@
+import {boot} from "../shared/bootstrap.js"; import {getData} from "../data/store.js"; import {fmtDate} from "../shared/utils.js";
+if(boot("admin","archive")) render();
+function render(){const d=getData(),items=[...d.archive,...d.tasks.filter(t=>t.status==="cancelled")];document.querySelector("#pageContent").innerHTML=`<section class="card"><div class="section-head"><h2>Archived work</h2><span class="badge">365-day retention</span></div>${items.length?items.map(x=>`<div class="list-row"><strong>${x.title}</strong><span>${fmtDate(x.date)}</span><span>${x.status}</span><span></span></div>`).join(""):`<div class="empty">Nothing is archived yet. Completed work remains visible in Tasks; cancelled/archived records will appear here.</div>`}</section>`}

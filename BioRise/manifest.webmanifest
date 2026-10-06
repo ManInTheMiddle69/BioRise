@@ -1,0 +1,9 @@
+{
+  "name": "BioRise",
+  "short_name": "BioRise",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#07110f",
+  "theme_color": "#07110f",
+  "description": "Private land workforce planning and progress management."
+}
