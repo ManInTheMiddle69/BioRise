@@ -29,7 +29,7 @@
       <p class="muted">Use your BioRise identification and passcode.</p>
       <form id="loginForm" class="form-stack">
         <label>Identification
-          <input id="workerId" autocomplete="username" placeholder="e.g. WRK001 or ADMIN001" required>
+          <input id="workerId" autocomplete="username" placeholder="Admin email or WRK001" required>
         </label>
         <label>Passcode
           <input id="passcode" type="password" autocomplete="current-password" placeholder="Enter passcode" required>
@@ -37,16 +37,9 @@
         <p id="loginError" class="form-error" aria-live="polite"></p>
         <button class="btn primary wide" type="submit">Sign in</button>
       </form>
-      <div class="demo-box">
-        <strong>Local demo access</strong>
-        <span>Admin: ADMIN001 / admin123</span>
-        <span>Worker: WRK001 / worker123</span>
-      </div>
       <button class="icon-btn theme-login" data-theme-toggle aria-label="Toggle theme">◐</button>
     </section>
   </main>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/config/supabase.js"></script>
   <script type="module" src="js/auth/login.js"></script>
 </body>
 </html>
