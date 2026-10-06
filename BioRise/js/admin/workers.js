@@ -122,10 +122,24 @@ function workerModal(id){
 }
 
 async function removeMany(ids){
-  if(!confirm(`Remove ${ids.length} worker record(s)? This removes their worker database record. Auth-account deletion will be added separately.`))return;
-  const {error}=await supabase.from("workers").delete().in("id",ids);
-  if(error){console.error(error);toast(error.message||"Could not remove worker","error");return;}
+  if(!confirm(`Permanently remove ${ids.length} worker record(s) and their login account(s)?`))return;
+
+  toast(ids.length === 1 ? "Deleting worker…" : "Deleting workers…");
+
+  for(const workerId of ids){
+    const {data,error}=await supabase.functions.invoke("delete-worker",{
+      body:{worker_id:workerId}
+    });
+
+    if(error || !data?.success){
+      console.error("delete-worker failed",error,data);
+      toast(data?.error || error?.message || "Could not delete worker","error");
+      await loadAndRender();
+      return;
+    }
+  }
+
   selected.clear();
-  toast("Worker record(s) removed from Supabase");
+  toast(ids.length === 1 ? "Worker deleted completely" : "Workers deleted completely");
   await loadAndRender();
 }
