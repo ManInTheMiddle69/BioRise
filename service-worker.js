@@ -1,4 +1,4 @@
-const CACHE="biorise-supabase-sync-fix-3";
+const CACHE="biorise-worker-points-details-fix-4";
 const CORE=["./","./index.html","./login.html","./css/global.css","./css/login.css","./js/app.js","./js/data/store.js","./js/data/demo-data.js"];
 self.addEventListener("install",e=>{self.skipWaiting();e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)))});
 self.addEventListener("activate",e=>e.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))),self.clients.claim()])));

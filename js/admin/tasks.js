@@ -49,23 +49,29 @@ function progressModal(id){const t=tasks.find(x=>x.id===id);if(!t)return;modal("
     const {error}=await supabase.from("tasks").update({progress,status}).eq("id",id);
     if(error){toast(error.message,"error");return;}
 
-    // Keep worker points synchronized with task completion.
-    // Completing a task awards its points to every assigned worker.
-    // Re-opening a completed task removes those points, preventing duplicate awards.
-    const becameCompleted=oldProgress<100&&progress>=100;
-    const reopened=oldProgress>=100&&progress<100;
-    if((becameCompleted||reopened)&&t.workerIds.length&&Number(t.points||0)!==0){
-      const delta=(becameCompleted?1:-1)*Number(t.points||0);
-      const {data:pointWorkers,error:pointsReadError}=await supabase.from("workers").select("id,points").in("id",t.workerIds);
-      if(pointsReadError){toast("Progress saved, but points could not be updated: "+pointsReadError.message,"error");await loadAndRender();return;}
-      for(const w of pointWorkers||[]){
-        const nextPoints=Math.max(0,Number(w.points||0)+delta);
-        const {error:pointsUpdateError}=await supabase.from("workers").update({points:nextPoints}).eq("id",w.id);
-        if(pointsUpdateError){toast("Progress saved, but points could not be updated: "+pointsUpdateError.message,"error");await loadAndRender();return;}
-      }
-    }
+    // Recalculate points from completed tasks so points cannot drift between devices.
+    // This also repairs points for tasks that were completed before the points fix.
+    const pointsError=await syncWorkerPoints();
+    if(pointsError){toast("Progress saved, but points could not be synchronized: "+pointsError,"error");await loadAndRender();return;}
 
-    toast(becameCompleted?`Task completed · ${Number(t.points||0)} points awarded`:reopened?"Task reopened · points adjusted":"Task progress updated");
+    toast(progress>=100?`Task completed · points synchronized`:"Task progress updated");
     await loadAndRender();
   })}
+async function syncWorkerPoints(){
+  const [{data:allWorkers,error:we},{data:completed,error:te}]=await Promise.all([
+    supabase.from("workers").select("id"),
+    supabase.from("tasks").select("points,task_workers(worker_id)").eq("status","completed")
+  ]);
+  if(we||te)return (we||te).message;
+  const totals=new Map((allWorkers||[]).map(w=>[w.id,0]));
+  for(const task of completed||[]){
+    const pts=Number(task.points||0);
+    for(const link of task.task_workers||[]) totals.set(link.worker_id,(totals.get(link.worker_id)||0)+pts);
+  }
+  for(const [workerId,points] of totals){
+    const {error}=await supabase.from("workers").update({points}).eq("id",workerId);
+    if(error)return error.message;
+  }
+  return null;
+}
 async function remove(ids){if(!confirm(`Remove ${ids.length} task(s)?`))return;const {error}=await supabase.from("tasks").delete().in("id",ids);if(error){toast(error.message,"error");return;}selected.clear();toast("Task(s) removed");await loadAndRender()}
