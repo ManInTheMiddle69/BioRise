@@ -21,6 +21,28 @@ async function load(){
   const err=wr.error||tr.error||lr.error||or.error;if(err){console.error(err);toast(err.message||"Could not load Supabase data","error");return;}
   workers=(wr.data||[]).map(normWorker); tasks=(tr.data||[]).map(normTask); locations=lr.data||[]; objectives=or.data||[];
 }
+async function recalculateAllWorkerPoints(){
+  // Calculate points from the real task + assignment rows, then persist totals.
+  // This deliberately does not depend on a database trigger being installed.
+  const [{data:allWorkers,error:we},{data:completed,error:te}]=await Promise.all([
+    supabase.from("workers").select("id"),
+    supabase.from("tasks").select("id,points,progress,status,task_workers(worker_id)")
+  ]);
+  if(we) throw we;
+  if(te) throw te;
+  const totals=new Map((allWorkers||[]).map(w=>[w.id,0]));
+  for(const task of (completed||[])){
+    if(Number(task.progress||0)<100 && task.status!=="completed") continue;
+    const pts=Number(task.points||0);
+    for(const assignment of (task.task_workers||[])){
+      if(totals.has(assignment.worker_id)) totals.set(assignment.worker_id,(totals.get(assignment.worker_id)||0)+pts);
+    }
+  }
+  for(const [workerId,points] of totals){
+    const {error}=await supabase.from("workers").update({points}).eq("id",workerId);
+    if(error) throw error;
+  }
+}
 async function loadAndRender(){await load();render();}
 function taskStatus(t){return t.progress>=100?"done":t.progress>0?"in-progress":"not-started"}
 function render(){document.querySelector("#pageActions").innerHTML=`<button class="btn primary" id="newTask">+ New task</button>`;document.querySelector("#pageContent").innerHTML=`<section class="card"><div id="selection"></div><div class="toolbar"><select id="filter"><option value="">All statuses</option><option value="not-started">Not started</option><option value="in-progress">In progress</option><option value="done">Completed</option></select><span class="spacer"></span><span class="small muted">${tasks.length} tasks · synced with Supabase</span></div><div class="table-wrap"><table class="data-table"><thead><tr><th class="select-cell"><input type="checkbox" class="select-all"></th><th>Task</th><th>Priority</th><th>Points</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead><tbody id="taskList">${taskRows(tasks)}</tbody></table></div></section>`;document.querySelector("#newTask").onclick=()=>taskModal();document.querySelector("#filter").onchange=e=>document.querySelector("#taskList").innerHTML=taskRows(tasks.filter(t=>!e.target.value||taskStatus(t)===e.target.value));document.querySelector(".select-all").onchange=e=>{selected=e.target.checked?new Set(tasks.map(t=>t.id)):new Set();render()};selection()}
@@ -40,6 +62,7 @@ function taskModal(id){const t=tasks.find(x=>x.id===id);modal(t?"Edit task":"Cre
     const locationId=String(fd.get("location")||""); if(locationId){const {error}=await supabase.from("task_locations").insert({task_id:taskId,location_id:locationId});if(error){toast(error.message,"error");return;}}
     const workerIds=fd.getAll("workers"); if(workerIds.length){const {error}=await supabase.from("task_workers").insert(workerIds.map(worker_id=>({task_id:taskId,worker_id})));if(error){toast(error.message,"error");return;}}
     await supabase.from("task_checklist").delete().eq("task_id",taskId); const checks=String(fd.get("checklist")||"").split("\n").map(x=>x.trim()).filter(Boolean);if(checks.length)await supabase.from("task_checklist").insert(checks.map(title=>({task_id:taskId,title})));
+    try{await recalculateAllWorkerPoints();}catch(pointError){console.error("Point recalculation failed",pointError);toast("Task saved, but points could not sync: "+(pointError.message||pointError),"error");return;}
     toast(t?"Task data updated":"Task created");await loadAndRender();
   })}
 function progressModal(id){const t=tasks.find(x=>x.id===id);if(!t)return;modal("Update task progress",`<div class="form-stack"><div><strong>${esc(t.title)}</strong><div class="small muted">Tracking only — task details stay unchanged.</div></div><label>Progress %<input name="progress" type="number" min="0" max="100" value="${t.progress}" required></label></div>`,async fd=>{
@@ -49,8 +72,17 @@ function progressModal(id){const t=tasks.find(x=>x.id===id);if(!t)return;modal("
     const {error}=await supabase.from("tasks").update({progress,status}).eq("id",id);
     if(error){toast(error.message,"error");return;}
 
-    // Points are recalculated by the database trigger. This keeps every device in sync.
+    // Recalculate from the task's stored points and its real task_workers assignments.
+    // This makes 100% completion immediately persist the worker total in Supabase.
+    try{
+      await recalculateAllWorkerPoints();
+    }catch(pointError){
+      console.error("Point recalculation failed",pointError);
+      toast("Progress saved, but points could not sync: "+(pointError.message||pointError),"error");
+      await loadAndRender();
+      return;
+    }
     toast(progress>=100?`Task completed · ${t.points} points applied`:"Task progress updated");
     await loadAndRender();
   })}
-async function remove(ids){if(!confirm(`Remove ${ids.length} task(s)?`))return;const {error}=await supabase.from("tasks").delete().in("id",ids);if(error){toast(error.message,"error");return;}selected.clear();toast("Task(s) removed");await loadAndRender()}
+async function remove(ids){if(!confirm(`Remove ${ids.length} task(s)?`))return;const {error}=await supabase.from("tasks").delete().in("id",ids);if(error){toast(error.message,"error");return;}try{await recalculateAllWorkerPoints();}catch(pointError){console.error("Point recalculation failed",pointError);toast("Task removed, but points could not sync: "+(pointError.message||pointError),"error");return;}selected.clear();toast("Task(s) removed");await loadAndRender()}
