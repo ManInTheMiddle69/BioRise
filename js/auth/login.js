@@ -19,14 +19,21 @@ form.addEventListener("submit", async (event) => {
   const password = passwordInput.value;
 
   if (!login || !password) {
-    errorBox.textContent = "Please enter your email and password.";
+    errorBox.textContent = "Please enter your BioRise ID/email and passcode.";
     return;
   }
 
+  // Workers only type WRK001. BioRise converts it to the hidden internal
+  // Supabase email used when the worker account was created.
+  const normalizedLogin = login.toUpperCase();
+  const isWorkerId = /^WRK[0-9]+$/.test(normalizedLogin);
+  const authEmail = isWorkerId
+    ? `${normalizedLogin.toLowerCase()}@biorise.example.com`
+    : login;
+
   try {
-    // For our first Supabase test, the admin enters their real email.
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: login,
+      email: authEmail,
       password
     });
 
@@ -74,7 +81,7 @@ form.addEventListener("submit", async (event) => {
     // Supabase role here. This is not used as the source of authentication.
     const store = getData();
     store.currentUser = {
-      id: profile.role === "admin" ? "ADMIN001" : (login.split("@")[0] || "USER"),
+      id: profile.role === "admin" ? "ADMIN001" : (isWorkerId ? normalizedLogin : (login.split("@")[0] || "USER")),
       role: profile.role,
       workerId: profile.worker_id || null,
       authUserId: data.user.id,
