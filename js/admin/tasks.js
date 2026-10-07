@@ -3,7 +3,7 @@ import {getData} from "../data/store.js";
 import {modal,toast,progressHTML,statusLabel,esc} from "../shared/utils.js";
 import {supabase} from "../config/supabase.js";
 
-let selected=new Set(), workers=[], tasks=[];
+let selected=new Set(), workers=[], tasks=[], locations=[], objectives=[];
 if(boot("admin","tasks")) loadAndRender();
 
 const normWorker=w=>({id:w.id,name:w.full_name,active:w.active!==false});
@@ -12,12 +12,14 @@ function normTask(t){
   return {id:t.id,title:t.title,description:t.description||"",workerIds:(t.task_workers||[]).map(x=>x.worker_id),locationIds:(t.task_locations||[]).map(x=>x.location_id),objectiveId:t.objective_id||"",date:t.task_date||"",start:(t.start_time||"").slice(0,5),deadline:deadline?deadline.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",hour12:false}):"",priority:t.priority||"medium",progress:Number(t.progress||0),recurring:t.recurrence||"none",points:Number(t.points||0),checklist:(t.task_checklist||[]).map(x=>x.title),status:t.status};
 }
 async function load(){
-  const [wr,tr]=await Promise.all([
+  const [wr,tr,lr,or]=await Promise.all([
     supabase.from("workers").select("id,full_name,active").order("full_name"),
-    supabase.from("tasks").select("*,task_workers(worker_id),task_locations(location_id),task_checklist(title)").order("task_date",{ascending:false})
+    supabase.from("tasks").select("*,task_workers(worker_id),task_locations(location_id),task_checklist(title)").order("task_date",{ascending:false}),
+    supabase.from("locations").select("id,name").eq("active",true).order("name"),
+    supabase.from("objectives").select("id,title,status").order("title")
   ]);
-  if(wr.error||tr.error){console.error(wr.error||tr.error);toast((wr.error||tr.error).message||"Could not load Supabase data","error");return;}
-  workers=(wr.data||[]).map(normWorker); tasks=(tr.data||[]).map(normTask);
+  const err=wr.error||tr.error||lr.error||or.error;if(err){console.error(err);toast(err.message||"Could not load Supabase data","error");return;}
+  workers=(wr.data||[]).map(normWorker); tasks=(tr.data||[]).map(normTask); locations=lr.data||[]; objectives=or.data||[];
 }
 async function loadAndRender(){await load();render();}
 function taskStatus(t){return t.progress>=100?"done":t.progress>0?"in-progress":"not-started"}
@@ -27,13 +29,15 @@ function selection(){const x=document.querySelector("#selection");x.innerHTML=se
 document.addEventListener("change",e=>{if(e.target.matches("[data-select]")){e.target.checked?selected.add(e.target.dataset.select):selected.delete(e.target.dataset.select);selection()}});
 document.addEventListener("click",e=>{const u=e.target.closest("[data-update]"),a=e.target.closest("[data-edit]"),b=e.target.closest("[data-delete]");if(u)progressModal(u.dataset.update);else if(a)taskModal(a.dataset.edit);else if(b)remove([b.dataset.delete])});
 function workerOptions(sel=[]){return workers.filter(w=>w.active).map(w=>`<option value="${w.id}" ${sel.includes(w.id)?"selected":""}>${esc(w.name)}</option>`).join("")}
-function taskModal(id){const local=getData(),t=tasks.find(x=>x.id===id);modal(t?"Edit task":"Create task",`<div class="form-grid"><label class="full">Title<input name="title" value="${esc(t?.title||"")}" required></label><label class="full">Description<textarea name="description" rows="3">${esc(t?.description||"")}</textarea></label><label>Workers<select name="workers" multiple size="5" required>${workerOptions(t?.workerIds||[])}</select></label><label>Location<select name="location"><option value="">No location</option>${local.locations.map(l=>`<option value="${l.id}" ${t?.locationIds?.includes(l.id)?"selected":""}>${esc(l.name)}</option>`).join("")}</select></label><label>Objective<select name="objective"><option value="">Normal task</option>${local.objectives.map(o=>`<option value="${o.id}" ${t?.objectiveId===o.id?"selected":""}>${esc(o.title)}</option>`).join("")}</select></label><label>Priority<select name="priority">${["low","medium","high","urgent"].map(v=>`<option ${t?.priority===v||(!t&&v==="medium")?"selected":""}>${v}</option>`).join("")}</select></label><label>Date<input type="date" name="date" value="${t?.date||""}" required></label><label>Start<input type="time" name="start" value="${t?.start||""}" required></label><label>Deadline<input type="time" name="deadline" value="${t?.deadline||""}" required></label><label>Recurring<select name="recurring">${["none","daily","weekly","monthly"].map(v=>`<option ${t?.recurring===v?"selected":""}>${v}</option>`).join("")}</select></label><label>Points<input name="points" type="number" value="${t?.points||20}"></label><label class="full">Checklist (one per line)<textarea name="checklist">${(t?.checklist||[]).join("\n")}</textarea></label></div>`,async fd=>{
+function taskModal(id){const t=tasks.find(x=>x.id===id);modal(t?"Edit task":"Create task",`<div class="form-grid"><label class="full">Title<input name="title" value="${esc(t?.title||"")}" required></label><label class="full">Description<textarea name="description" rows="3">${esc(t?.description||"")}</textarea></label><label>Workers<select name="workers" multiple size="5" required>${workerOptions(t?.workerIds||[])}</select></label><label>Location<select name="location"><option value="">No location</option>${locations.map(l=>`<option value="${l.id}" ${t?.locationIds?.includes(l.id)?"selected":""}>${esc(l.name)}</option>`).join("")}</select></label><label>Objective<select name="objective"><option value="">Normal task</option>${objectives.map(o=>`<option value="${o.id}" ${t?.objectiveId===o.id?"selected":""}>${esc(o.title)}</option>`).join("")}</select></label><label>Priority<select name="priority">${["low","medium","high","urgent"].map(v=>`<option ${t?.priority===v||(!t&&v==="medium")?"selected":""}>${v}</option>`).join("")}</select></label><label>Date<input type="date" name="date" value="${t?.date||""}" required></label><label>Start<input type="time" name="start" value="${t?.start||""}" required></label><label>Deadline<input type="time" name="deadline" value="${t?.deadline||""}" required></label><label>Recurring<select name="recurring">${["none","daily","weekly","monthly"].map(v=>`<option ${t?.recurring===v?"selected":""}>${v}</option>`).join("")}</select></label><label>Points<input name="points" type="number" value="${t?.points||20}"></label><label class="full">Checklist (one per line)<textarea name="checklist">${(t?.checklist||[]).join("\n")}</textarea></label></div>`,async fd=>{
     const date=String(fd.get("date")), deadlineTime=String(fd.get("deadline"));
-    const payload={title:String(fd.get("title")),description:String(fd.get("description")||""),objective_id:null,task_date:date,start_time:String(fd.get("start")),deadline:new Date(`${date}T${deadlineTime}:00`).toISOString(),priority:String(fd.get("priority")),recurrence:String(fd.get("recurring")),points:Number(fd.get("points")||0)};
+    const payload={title:String(fd.get("title")),description:String(fd.get("description")||""),objective_id:String(fd.get("objective")||"")||null,task_date:date,start_time:String(fd.get("start")),deadline:new Date(`${date}T${deadlineTime}:00`).toISOString(),priority:String(fd.get("priority")),recurrence:String(fd.get("recurring")),points:Number(fd.get("points")||0)};
     let taskId=id;
     if(t){const {error}=await supabase.from("tasks").update(payload).eq("id",id);if(error){toast(error.message,"error");return;}}
     else{payload.progress=0;payload.status="not-started";const {data,error}=await supabase.from("tasks").insert(payload).select("id").single();if(error){toast(error.message,"error");return;}taskId=data.id;}
     await supabase.from("task_workers").delete().eq("task_id",taskId);
+    await supabase.from("task_locations").delete().eq("task_id",taskId);
+    const locationId=String(fd.get("location")||""); if(locationId){const {error}=await supabase.from("task_locations").insert({task_id:taskId,location_id:locationId});if(error){toast(error.message,"error");return;}}
     const workerIds=fd.getAll("workers"); if(workerIds.length){const {error}=await supabase.from("task_workers").insert(workerIds.map(worker_id=>({task_id:taskId,worker_id})));if(error){toast(error.message,"error");return;}}
     await supabase.from("task_checklist").delete().eq("task_id",taskId); const checks=String(fd.get("checklist")||"").split("\n").map(x=>x.trim()).filter(Boolean);if(checks.length)await supabase.from("task_checklist").insert(checks.map(title=>({task_id:taskId,title})));
     toast(t?"Task data updated":"Task created");await loadAndRender();
