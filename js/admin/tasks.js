@@ -23,8 +23,8 @@ async function load(){
 }
 async function loadAndRender(){await load();render();}
 function taskStatus(t){return t.progress>=100?"done":t.progress>0?"in-progress":"not-started"}
-function render(){document.querySelector("#pageActions").innerHTML=`<button class="btn primary" id="newTask">+ New task</button>`;document.querySelector("#pageContent").innerHTML=`<section class="card"><div id="selection"></div><div class="toolbar"><select id="filter"><option value="">All statuses</option><option value="not-started">Not started</option><option value="in-progress">In progress</option><option value="done">Completed</option></select><span class="spacer"></span><span class="small muted">${tasks.length} tasks · synced with Supabase</span></div><div class="table-wrap"><table class="data-table"><thead><tr><th class="select-cell"><input type="checkbox" class="select-all"></th><th>Task</th><th>Priority</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead><tbody id="taskList">${taskRows(tasks)}</tbody></table></div></section>`;document.querySelector("#newTask").onclick=()=>taskModal();document.querySelector("#filter").onchange=e=>document.querySelector("#taskList").innerHTML=taskRows(tasks.filter(t=>!e.target.value||taskStatus(t)===e.target.value));document.querySelector(".select-all").onchange=e=>{selected=e.target.checked?new Set(tasks.map(t=>t.id)):new Set();render()};selection()}
-function taskRows(ts){return ts.map(t=>`<tr><td><input type="checkbox" class="row-check" data-select="${t.id}" ${selected.has(t.id)?"checked":""}></td><td><strong>${esc(t.title)}</strong><br><small class="muted">${t.workerIds.map(id=>workers.find(w=>w.id===id)?.name).filter(Boolean).join(", ")||"Unassigned"} · ${t.start||"—"}–${t.deadline||"—"}</small></td><td><span class="badge ${t.priority}">${t.priority}</span></td><td style="min-width:140px">${progressHTML(t.progress)}<small>${t.progress}%</small></td><td><span class="badge ${taskStatus(t)==="done"?"done":"progress"}">${statusLabel(taskStatus(t))}</span></td><td><div class="action-group"><button class="btn primary compact" data-update="${t.id}">Update</button><button class="btn ghost compact" data-edit="${t.id}">Edit</button><button class="btn danger compact" data-delete="${t.id}">Remove</button></div></td></tr>`).join("")||`<tr><td colspan="6"><div class="empty">No tasks found.</div></td></tr>`}
+function render(){document.querySelector("#pageActions").innerHTML=`<button class="btn primary" id="newTask">+ New task</button>`;document.querySelector("#pageContent").innerHTML=`<section class="card"><div id="selection"></div><div class="toolbar"><select id="filter"><option value="">All statuses</option><option value="not-started">Not started</option><option value="in-progress">In progress</option><option value="done">Completed</option></select><span class="spacer"></span><span class="small muted">${tasks.length} tasks · synced with Supabase</span></div><div class="table-wrap"><table class="data-table"><thead><tr><th class="select-cell"><input type="checkbox" class="select-all"></th><th>Task</th><th>Priority</th><th>Points</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead><tbody id="taskList">${taskRows(tasks)}</tbody></table></div></section>`;document.querySelector("#newTask").onclick=()=>taskModal();document.querySelector("#filter").onchange=e=>document.querySelector("#taskList").innerHTML=taskRows(tasks.filter(t=>!e.target.value||taskStatus(t)===e.target.value));document.querySelector(".select-all").onchange=e=>{selected=e.target.checked?new Set(tasks.map(t=>t.id)):new Set();render()};selection()}
+function taskRows(ts){return ts.map(t=>`<tr><td><input type="checkbox" class="row-check" data-select="${t.id}" ${selected.has(t.id)?"checked":""}></td><td><strong>${esc(t.title)}</strong><br><small class="muted">${t.workerIds.map(id=>workers.find(w=>w.id===id)?.name).filter(Boolean).join(", ")||"Unassigned"} · ${t.start||"—"}–${t.deadline||"—"}</small></td><td><span class="badge ${t.priority}">${t.priority}</span></td><td><strong>${t.points}</strong> pts</td><td style="min-width:140px">${progressHTML(t.progress)}<small>${t.progress}%</small></td><td><span class="badge ${taskStatus(t)==="done"?"done":"progress"}">${statusLabel(taskStatus(t))}</span></td><td><div class="action-group"><button class="btn primary compact" data-update="${t.id}">Update</button><button class="btn ghost compact" data-edit="${t.id}">Edit</button><button class="btn danger compact" data-delete="${t.id}">Remove</button></div></td></tr>`).join("")||`<tr><td colspan="7"><div class="empty">No tasks found.</div></td></tr>`}
 function selection(){const x=document.querySelector("#selection");x.innerHTML=selected.size?`<div class="selection-bar"><strong>${selected.size} selected</strong><button class="btn danger compact" id="bulkDelete">Remove selected</button></div>`:"";if(document.querySelector("#bulkDelete"))document.querySelector("#bulkDelete").onclick=()=>remove([...selected])}
 document.addEventListener("change",e=>{if(e.target.matches("[data-select]")){e.target.checked?selected.add(e.target.dataset.select):selected.delete(e.target.dataset.select);selection()}});
 document.addEventListener("click",e=>{const u=e.target.closest("[data-update]"),a=e.target.closest("[data-edit]"),b=e.target.closest("[data-delete]");if(u)progressModal(u.dataset.update);else if(a)taskModal(a.dataset.edit);else if(b)remove([b.dataset.delete])});
@@ -49,29 +49,8 @@ function progressModal(id){const t=tasks.find(x=>x.id===id);if(!t)return;modal("
     const {error}=await supabase.from("tasks").update({progress,status}).eq("id",id);
     if(error){toast(error.message,"error");return;}
 
-    // Recalculate points from completed tasks so points cannot drift between devices.
-    // This also repairs points for tasks that were completed before the points fix.
-    const pointsError=await syncWorkerPoints();
-    if(pointsError){toast("Progress saved, but points could not be synchronized: "+pointsError,"error");await loadAndRender();return;}
-
-    toast(progress>=100?`Task completed · points synchronized`:"Task progress updated");
+    // Points are recalculated by the database trigger. This keeps every device in sync.
+    toast(progress>=100?`Task completed · ${t.points} points applied`:"Task progress updated");
     await loadAndRender();
   })}
-async function syncWorkerPoints(){
-  const [{data:allWorkers,error:we},{data:completed,error:te}]=await Promise.all([
-    supabase.from("workers").select("id"),
-    supabase.from("tasks").select("points,task_workers(worker_id)").eq("status","completed")
-  ]);
-  if(we||te)return (we||te).message;
-  const totals=new Map((allWorkers||[]).map(w=>[w.id,0]));
-  for(const task of completed||[]){
-    const pts=Number(task.points||0);
-    for(const link of task.task_workers||[]) totals.set(link.worker_id,(totals.get(link.worker_id)||0)+pts);
-  }
-  for(const [workerId,points] of totals){
-    const {error}=await supabase.from("workers").update({points}).eq("id",workerId);
-    if(error)return error.message;
-  }
-  return null;
-}
 async function remove(ids){if(!confirm(`Remove ${ids.length} task(s)?`))return;const {error}=await supabase.from("tasks").delete().in("id",ids);if(error){toast(error.message,"error");return;}selected.clear();toast("Task(s) removed");await loadAndRender()}
