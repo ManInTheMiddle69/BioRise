@@ -42,5 +42,30 @@ function taskModal(id){const t=tasks.find(x=>x.id===id);modal(t?"Edit task":"Cre
     await supabase.from("task_checklist").delete().eq("task_id",taskId); const checks=String(fd.get("checklist")||"").split("\n").map(x=>x.trim()).filter(Boolean);if(checks.length)await supabase.from("task_checklist").insert(checks.map(title=>({task_id:taskId,title})));
     toast(t?"Task data updated":"Task created");await loadAndRender();
   })}
-function progressModal(id){const t=tasks.find(x=>x.id===id);if(!t)return;modal("Update task progress",`<div class="form-stack"><div><strong>${esc(t.title)}</strong><div class="small muted">Tracking only — task details stay unchanged.</div></div><label>Progress %<input name="progress" type="number" min="0" max="100" value="${t.progress}" required></label></div>`,async fd=>{const progress=Math.max(0,Math.min(100,Number(fd.get("progress")||0))),status=progress>=100?"completed":progress>0?"in-progress":"not-started";const {error}=await supabase.from("tasks").update({progress,status}).eq("id",id);if(error){toast(error.message,"error");return;}toast("Task progress updated");await loadAndRender();})}
+function progressModal(id){const t=tasks.find(x=>x.id===id);if(!t)return;modal("Update task progress",`<div class="form-stack"><div><strong>${esc(t.title)}</strong><div class="small muted">Tracking only — task details stay unchanged.</div></div><label>Progress %<input name="progress" type="number" min="0" max="100" value="${t.progress}" required></label></div>`,async fd=>{
+    const oldProgress=Number(t.progress||0);
+    const progress=Math.max(0,Math.min(100,Number(fd.get("progress")||0)));
+    const status=progress>=100?"completed":progress>0?"in-progress":"not-started";
+    const {error}=await supabase.from("tasks").update({progress,status}).eq("id",id);
+    if(error){toast(error.message,"error");return;}
+
+    // Keep worker points synchronized with task completion.
+    // Completing a task awards its points to every assigned worker.
+    // Re-opening a completed task removes those points, preventing duplicate awards.
+    const becameCompleted=oldProgress<100&&progress>=100;
+    const reopened=oldProgress>=100&&progress<100;
+    if((becameCompleted||reopened)&&t.workerIds.length&&Number(t.points||0)!==0){
+      const delta=(becameCompleted?1:-1)*Number(t.points||0);
+      const {data:pointWorkers,error:pointsReadError}=await supabase.from("workers").select("id,points").in("id",t.workerIds);
+      if(pointsReadError){toast("Progress saved, but points could not be updated: "+pointsReadError.message,"error");await loadAndRender();return;}
+      for(const w of pointWorkers||[]){
+        const nextPoints=Math.max(0,Number(w.points||0)+delta);
+        const {error:pointsUpdateError}=await supabase.from("workers").update({points:nextPoints}).eq("id",w.id);
+        if(pointsUpdateError){toast("Progress saved, but points could not be updated: "+pointsUpdateError.message,"error");await loadAndRender();return;}
+      }
+    }
+
+    toast(becameCompleted?`Task completed · ${Number(t.points||0)} points awarded`:reopened?"Task reopened · points adjusted":"Task progress updated");
+    await loadAndRender();
+  })}
 async function remove(ids){if(!confirm(`Remove ${ids.length} task(s)?`))return;const {error}=await supabase.from("tasks").delete().in("id",ids);if(error){toast(error.message,"error");return;}selected.clear();toast("Task(s) removed");await loadAndRender()}
